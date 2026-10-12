@@ -5,33 +5,74 @@ function ExecuteScript() {
             while (new Date().getTime() - start < ms) {}
         }
 
-        function findElementRecursive(win, id, depth) {
-            if (!win || depth > 5) return null;
-            try {
-                var doc = win.document;
-                if (!doc) return null;
-                var el = doc.getElementById(id);
-                if (el) return el;
-                var frames = doc.querySelectorAll("iframe, frame");
-                for (var i = 0; i < frames.length; i++) {
-                    try {
-                        var res = findElementRecursive(iframes[i].contentWindow, id, depth + 1);
+        // Tìm kiếm document đang chứa con trỏ hoặc duyệt iframe
+        function getActiveOrSearch(idSubstr) {
+            // 1. Kiểm tra nếu con trỏ đang nhấp nháy tại chính ô input đó
+            var activeDoc = document;
+            if (activeDoc.activeElement && activeDoc.activeElement.tagName === "IFRAME") {
+                try { activeDoc = activeDoc.activeElement.contentWindow.document; } catch(e) {}
+            }
+            if (activeDoc.activeElement && activeDoc.activeElement.tagName === "INPUT") {
+                return activeDoc.activeElement;
+            }
+
+            // 2. Nếu không, quét đệ quy qua các iframe
+            function scan(win, depth) {
+                if (!win || depth > 5) return null;
+                try {
+                    var doc = win.document;
+                    if (!doc) return null;
+
+                    // Thử tìm theo activeElement trong iframe
+                    if (doc.activeElement && doc.activeElement.tagName === "INPUT") {
+                        return doc.activeElement;
+                    }
+
+                    // Thử tìm theo các dạng ID phổ biến của Flexcube
+                    var selector = "input[id*='" + idSubstr + "'], [id*='" + idSubstr + "'] input";
+                    var el = doc.querySelector(selector);
+                    if (el) return el;
+
+                    var frames = doc.querySelectorAll("iframe, frame");
+                    for (var i = 0; i < frames.length; i++) {
+                        var res = scan(frames[i].contentWindow, depth + 1);
                         if (res) return res;
-                    } catch (e) {}
-                }
-            } catch (e) {}
-            return null;
+                    }
+                } catch(e) {}
+                return null;
+            }
+
+            return scan(window, 0);
         }
 
-        // Hàm cập nhật chuẩn Oracle JET cho Flexcube
+        function findByFlexibleId(idSubstr) {
+            function scan(win, depth) {
+                if (!win || depth > 5) return null;
+                try {
+                    var doc = win.document;
+                    if (!doc) return null;
+
+                    var selector = "input[id*='" + idSubstr + "'], [id*='" + idSubstr + "'] input, input[name*='" + idSubstr + "']";
+                    var el = doc.querySelector(selector);
+                    if (el) return el;
+
+                    var frames = doc.querySelectorAll("iframe, frame");
+                    for (var i = 0; i < frames.length; i++) {
+                        var res = scan(frames[i].contentWindow, depth + 1);
+                        if (res) return res;
+                    }
+                } catch(e) {}
+                return null;
+            }
+            return scan(window, 0);
+        }
+
         function setJETValue(inputEl, val) {
             if (!inputEl) return;
             var win = inputEl.ownerDocument.defaultView || window;
             
-            // 1. Focus vào ô
             try { inputEl.focus(); } catch(e) {}
 
-            // 2. Gán native value
             try {
                 var proto = win.HTMLInputElement.prototype;
                 var nativeSetter = Object.getOwnPropertyDescriptor(proto, "value").set;
@@ -40,69 +81,54 @@ function ExecuteScript() {
                 inputEl.value = val;
             }
 
-            // 3. Cập nhật trực tiếp lên Web Component oj-input-text (nếu có)
             var ojComp = inputEl.closest ? inputEl.closest("oj-input-text, oj-combobox-one") : null;
-            if (ojComp) {
+            if (ojComp && typeof ojComp.setProperty === "function") {
                 try {
-                    if (typeof ojComp.setProperty === "function") {
-                        ojComp.setProperty("value", val);
-                        ojComp.setProperty("rawValue", val);
-                    }
+                    ojComp.setProperty("value", val);
+                    ojComp.setProperty("rawValue", val);
                 } catch(e) {}
             }
 
-            // 4. Kích hoạt chuỗi sự kiện DOM & Oracle JET Custom Events
-            var eventList = ['input', 'change'];
-            eventList.forEach(function(evtName) {
-                try {
-                    inputEl.dispatchEvent(new win.Event(evtName, { bubbles: true, cancelable: true }));
-                } catch(e) {}
+            ['input', 'change'].forEach(function(evt) {
+                try { inputEl.dispatchEvent(new win.Event(evt, { bubbles: true, cancelable: true })); } catch(e) {}
             });
-
-            // Gửi thêm CustomEvent của JET nếu component hỗ trợ
-            if (ojComp) {
-                try {
-                    ojComp.dispatchEvent(new win.CustomEvent('ojValueUpdated', {
-                        detail: { value: val, previousValue: '' },
-                        bubbles: true
-                    }));
-                } catch(e) {}
-            }
         }
 
-        // 1. Chờ ô USER_ID sẵn sàng
-        var maxWaitMs = 8000;
+        // 1. Lấy ô USER_ID (Tận dụng ngay ô đang nhấp nháy con trỏ)
+        var maxWaitMs = 6000;
         var startWait = new Date().getTime();
         var userIdEl = null;
 
         while (new Date().getTime() - startWait < maxWaitMs) {
-            userIdEl = findElementRecursive(window, "BLK_USER__USER_ID|input", 0);
-            if (userIdEl && !userIdEl.disabled && !userIdEl.readOnly) break;
-            syncSleep(250);
+            userIdEl = getActiveOrSearch("USER_ID");
+            if (userIdEl && !userIdEl.disabled && !userIdEl.readOnly) {
+                break;
+            }
+            syncSleep(200);
         }
 
         if (!userIdEl) return "TIMEOUT_WAITING_USER_ID";
 
-        // 2. Điền USER_ID & USER_NAME
+        // 2. Điền USER_ID
         setJETValue(userIdEl, "TESTUSER");
         try { userIdEl.blur(); } catch(e) {}
         syncSleep(300);
 
-        var nameEl = findElementRecursive(window, "BLK_USER__USER_NAME|input", 0);
+        // 3. Điền USER_NAME
+        var nameEl = findByFlexibleId("USER_NAME");
         if (nameEl) {
             setJETValue(nameEl, "TEST USER");
             try { nameEl.blur(); } catch(e) {}
         }
         syncSleep(300);
 
-        // 3. Điền HOME_ENTITY và ép kích hoạt Validation
-        var entityEl = findElementRecursive(window, "BLK_USER__HOME_ENTITY|input", 0);
+        // 4. Điền HOME_ENTITY và ép trigger kích hoạt bảng Entity Mapping
+        var entityEl = findByFlexibleId("HOME_ENTITY");
         if (entityEl) {
             var entityWin = entityEl.ownerDocument.defaultView || window;
-
             setJETValue(entityEl, "ENTITY_ID1");
 
-            // Giả lập phím Tab/Enter trước khi rời ô
+            // Bắn Tab và Enter
             [13, 9].forEach(function(code) {
                 var k = (code === 13) ? 'Enter' : 'Tab';
                 ['keydown', 'keyup'].forEach(function(evtType) {
@@ -114,15 +140,12 @@ function ExecuteScript() {
                 });
             });
 
-            // Blur khỏi ô HOME_ENTITY
             try { entityEl.blur(); } catch(e) {}
         }
-        
-        // Nghỉ 1 giây để Flexcube gửi AJAX lấy Entity Mapping
         syncSleep(1000);
 
-        // 4. Điền PASSWORD
-        var pwdEl = findElementRecursive(window, "BLK_USER__USER_PASSWORD|input", 0);
+        // 5. Điền PASSWORD
+        var pwdEl = findByFlexibleId("USER_PASSWORD") || findByFlexibleId("PASSWORD");
         if (pwdEl) {
             setJETValue(pwdEl, "Password@123");
             try { pwdEl.blur(); } catch(e) {}
