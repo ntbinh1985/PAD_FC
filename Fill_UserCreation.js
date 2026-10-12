@@ -10,12 +10,10 @@ function ExecuteScript() {
             try {
                 var doc = win.document;
                 if (!doc) return null;
-
                 var el = doc.getElementById(id);
                 if (el) return el;
-
-                var iframes = doc.querySelectorAll("iframe, frame");
-                for (var i = 0; i < iframes.length; i++) {
+                var frames = doc.querySelectorAll("iframe, frame");
+                for (var i = 0; i < frames.length; i++) {
                     try {
                         var res = findElementRecursive(iframes[i].contentWindow, id, depth + 1);
                         if (res) return res;
@@ -25,114 +23,114 @@ function ExecuteScript() {
             return null;
         }
 
-        // Hàm kích hoạt giả lập gõ phím Tab/Enter để trigger Flexcube LOV/Enrichment
-        function triggerFlexcubeValidation(el, win) {
-            var keys = [
-                { key: 'Enter', keyCode: 13, which: 13 },
-                { key: 'Tab', keyCode: 9, which: 9 }
-            ];
+        // Hàm cập nhật chuẩn Oracle JET cho Flexcube
+        function setJETValue(inputEl, val) {
+            if (!inputEl) return;
+            var win = inputEl.ownerDocument.defaultView || window;
+            
+            // 1. Focus vào ô
+            try { inputEl.focus(); } catch(e) {}
 
-            keys.forEach(function(k) {
-                ['keydown', 'keypress', 'keyup'].forEach(function(evtType) {
-                    try {
-                        var keyEvt = new win.KeyboardEvent(evtType, {
-                            key: k.key,
-                            code: k.key,
-                            keyCode: k.keyCode,
-                            which: k.which,
-                            bubbles: true,
-                            cancelable: true
-                        });
-                        el.dispatchEvent(keyEvt);
-                    } catch(e) {}
-                });
-            });
-        }
-
-        function setFieldValue(el, value, isEnrichment) {
-            if (!el) return false;
-            var win = el.ownerDocument.defaultView || window;
-
-            // 1. Focus và click để component nhận trạng thái Active
-            try { el.focus(); } catch (e) {}
-            try { el.click(); } catch (e) {}
-
-            // 2. Gán giá trị qua native setter (bỏ qua override của Knockout/JET)
+            // 2. Gán native value
             try {
                 var proto = win.HTMLInputElement.prototype;
                 var nativeSetter = Object.getOwnPropertyDescriptor(proto, "value").set;
-                nativeSetter.call(el, value);
-            } catch (err) {
-                el.value = value;
+                nativeSetter.call(inputEl, val);
+            } catch(e) {
+                inputEl.value = val;
             }
 
-            // 3. Nếu là phần tử Oracle JET Custom Element (oj-input-text / oj-combobox)
-            var parentOj = el.closest ? el.closest("oj-input-text, oj-combobox-one, oj-select-one") : null;
-            if (parentOj && typeof parentOj.setProperty === "function") {
+            // 3. Cập nhật trực tiếp lên Web Component oj-input-text (nếu có)
+            var ojComp = inputEl.closest ? inputEl.closest("oj-input-text, oj-combobox-one") : null;
+            if (ojComp) {
                 try {
-                    parentOj.setProperty('value', value);
+                    if (typeof ojComp.setProperty === "function") {
+                        ojComp.setProperty("value", val);
+                        ojComp.setProperty("rawValue", val);
+                    }
                 } catch(e) {}
             }
 
-            // 4. Kích hoạt chuỗi sự kiện DOM
-            ['input', 'change'].forEach(function(evtType) {
+            // 4. Kích hoạt chuỗi sự kiện DOM & Oracle JET Custom Events
+            var eventList = ['input', 'change'];
+            eventList.forEach(function(evtName) {
                 try {
-                    var evt = new win.Event(evtType, { bubbles: true, cancelable: true });
-                    el.dispatchEvent(evt);
-                } catch (e) {}
+                    inputEl.dispatchEvent(new win.Event(evtName, { bubbles: true, cancelable: true }));
+                } catch(e) {}
             });
 
-            // 5. Nếu là trường kích hoạt bảng như HOME_ENTITY: giả lập Tab/Enter và Blur
-            if (isEnrichment) {
-                triggerFlexcubeValidation(el, win);
+            // Gửi thêm CustomEvent của JET nếu component hỗ trợ
+            if (ojComp) {
+                try {
+                    ojComp.dispatchEvent(new win.CustomEvent('ojValueUpdated', {
+                        detail: { value: val, previousValue: '' },
+                        bubbles: true
+                    }));
+                } catch(e) {}
             }
-
-            try { el.blur(); } catch (e) {}
-            return true;
         }
 
-        // Chờ ô USER_ID sẵn sàng
-        var maxWaitMs = 10000;
+        // 1. Chờ ô USER_ID sẵn sàng
+        var maxWaitMs = 8000;
         var startWait = new Date().getTime();
-        var userIdField = null;
+        var userIdEl = null;
 
         while (new Date().getTime() - startWait < maxWaitMs) {
-            userIdField = findElementRecursive(window, "BLK_USER__USER_ID|input", 0);
-            if (userIdField && !userIdField.disabled && !userIdField.readOnly) {
-                break;
-            }
+            userIdEl = findElementRecursive(window, "BLK_USER__USER_ID|input", 0);
+            if (userIdEl && !userIdEl.disabled && !userIdEl.readOnly) break;
             syncSleep(250);
         }
 
-        if (!userIdField || userIdField.disabled || userIdField.readOnly) {
-            return "TIMEOUT_WAITING_USER_ID";
+        if (!userIdEl) return "TIMEOUT_WAITING_USER_ID";
+
+        // 2. Điền USER_ID & USER_NAME
+        setJETValue(userIdEl, "TESTUSER");
+        try { userIdEl.blur(); } catch(e) {}
+        syncSleep(300);
+
+        var nameEl = findElementRecursive(window, "BLK_USER__USER_NAME|input", 0);
+        if (nameEl) {
+            setJETValue(nameEl, "TEST USER");
+            try { nameEl.blur(); } catch(e) {}
+        }
+        syncSleep(300);
+
+        // 3. Điền HOME_ENTITY và ép kích hoạt Validation
+        var entityEl = findElementRecursive(window, "BLK_USER__HOME_ENTITY|input", 0);
+        if (entityEl) {
+            var entityWin = entityEl.ownerDocument.defaultView || window;
+
+            setJETValue(entityEl, "ENTITY_ID1");
+
+            // Giả lập phím Tab/Enter trước khi rời ô
+            [13, 9].forEach(function(code) {
+                var k = (code === 13) ? 'Enter' : 'Tab';
+                ['keydown', 'keyup'].forEach(function(evtType) {
+                    try {
+                        entityEl.dispatchEvent(new entityWin.KeyboardEvent(evtType, {
+                            key: k, code: k, keyCode: code, which: code, bubbles: true
+                        }));
+                    } catch(e) {}
+                });
+            });
+
+            // Blur khỏi ô HOME_ENTITY
+            try { entityEl.blur(); } catch(e) {}
+        }
+        
+        // Nghỉ 1 giây để Flexcube gửi AJAX lấy Entity Mapping
+        syncSleep(1000);
+
+        // 4. Điền PASSWORD
+        var pwdEl = findElementRecursive(window, "BLK_USER__USER_PASSWORD|input", 0);
+        if (pwdEl) {
+            setJETValue(pwdEl, "Password@123");
+            try { pwdEl.blur(); } catch(e) {}
         }
 
-        // Cấu hình các trường (đánh dấu isEnrichment = true cho HOME_ENTITY)
-        var fieldsToFill = [
-            { id: "BLK_USER__USER_ID|input", value: "TESTUSER", delayAfter: 500, isEnrichment: false },
-            { id: "BLK_USER__USER_NAME|input", value: "TEST USER", delayAfter: 500, isEnrichment: false },
-            { id: "BLK_USER__HOME_ENTITY|input", value: "ENTITY_ID1", delayAfter: 1500, isEnrichment: true },
-            { id: "BLK_USER__USER_PASSWORD|input", value: "Password@123", delayAfter: 500, isEnrichment: false }
-        ];
+        return "SUCCESS_COMPLETED";
 
-        var filledCount = 0;
-
-        for (var i = 0; i < fieldsToFill.length; i++) {
-            var item = fieldsToFill[i];
-            var targetEl = (i === 0) ? userIdField : findElementRecursive(window, item.id, 0);
-
-            if (targetEl) {
-                setFieldValue(targetEl, item.value, item.isEnrichment);
-                filledCount++;
-            }
-
-            syncSleep(item.delayAfter);
-        }
-
-        return "SUCCESS: FILLED_" + filledCount + "_OF_" + fieldsToFill.length;
-
-    } catch (globalErr) {
-        return "ERROR: " + globalErr.message;
+    } catch(err) {
+        return "ERROR: " + err.message;
     }
 }
