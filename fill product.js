@@ -1,44 +1,77 @@
 function ExecuteScript() {
-   function findTargetDoc(win) {
+   function findDoc(win, sel) {
        try {
            var doc = win.document;
-           if (doc.querySelector('#cmdAddRow_BLK_USERPRODUCTS')) return doc;
+           if (doc.querySelector(sel)) return doc;
            var frames = doc.querySelectorAll('iframe');
            for (var i = 0; i < frames.length; i++) {
-               var found = findTargetDoc(frames[i].contentWindow);
+               var found = findDoc(frames[i].contentWindow, sel);
                if (found) return found;
            }
        } catch(e) {}
        return null;
    }
 
-   var targetDoc = findTargetDoc(window);
-   if (!targetDoc) return "Error: Không tìm thấy frame chứa nút Add Row Products";
+   // Tìm frame có chứa ô nhập PRDPRDCD
+   var targetDoc = findDoc(window, 'input[name="PRDPRDCD"]');
+   if (!targetDoc) return "Error: Không tìm thấy frame nhập liệu Product";
 
-   var ojButton = targetDoc.querySelector('oj-button#cmdAddRow_BLK_USERPRODUCTS') || targetDoc.querySelector('#cmdAddRow_BLK_USERPRODUCTS');
-   if (!ojButton) return "Error: Không tìm thấy oj-button Add Row Products";
+   // Giá trị Product Code từ Power Automate Desktop
+   var productVal = "%CurrentProduct['ProductCode']%".trim();
 
-   // Kiểm tra trạng thái disabled / busy
-   var btn = ojButton.querySelector('button') || ojButton;
-   if (btn.disabled || ojButton.classList.contains('oj-disabled') || ojButton.getAttribute('aria-disabled') === 'true') {
-       return "Warning: Nút Add Row Products đang ở trạng thái disabled/bận, cần thêm action Wait";
+   // Lấy danh sách tất cả các ô input Product Code trên bảng (dòng cuối cùng là dòng vừa add)
+   var productInputs = Array.from(targetDoc.querySelectorAll('input[id*="PRDPRDCDRC"]'));
+   if (productInputs.length === 0) return "Error: Chưa có dòng nào trên bảng Product";
+
+   var targetProductInput = productInputs[productInputs.length - 1];
+
+   function fillField(inputEl, val) {
+       if (!inputEl) return;
+       inputEl.focus();
+       inputEl.value = val;
+       inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+       inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+       inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, bubbles: true }));
+       inputEl.blur();
    }
 
-   // Nhả focus từ phần tử trước đó
-   if (targetDoc.activeElement && targetDoc.activeElement.blur) {
-       targetDoc.activeElement.blur();
+   // Điền Product Code vào dòng mới nhất
+   fillField(targetProductInput, productVal);
+
+   // Quét và tự động chọn kết quả LOV nếu bật popup/dropdown
+   function handleLov(win) {
+       try {
+           var doc = win.document;
+           var cells = Array.from(doc.querySelectorAll('td, div[role="gridcell"]'));
+           for (var i = 0; i < cells.length; i++) {
+               if (cells[i].textContent.trim() === productVal) {
+                   var row = cells[i].closest('tr') || cells[i].closest('div[role="row"]') || cells[i];
+                   ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(function(evt) {
+                       cells[i].dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: win }));
+                       row.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: win }));
+                   });
+                   var enter = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
+                   row.dispatchEvent(enter);
+                   cells[i].dispatchEvent(enter);
+                   return true;
+               }
+           }
+           var frames = doc.querySelectorAll('iframe');
+           for (var j = 0; j < frames.length; j++) {
+               if (handleLov(frames[j].contentWindow)) return true;
+           }
+       } catch(e) {}
+       return false;
    }
-   targetDoc.body.focus();
 
-   // Kích hoạt chuỗi sự kiện click vào button thực tế
-   ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(function(evtName) {
-       var evt = new MouseEvent(evtName, {
-           bubbles: true,
-           cancelable: true,
-           view: targetDoc.defaultView
-       });
-       btn.dispatchEvent(evt);
-   });
+   // Chờ 500ms để bắt popup LOV nếu hệ thống gọi disp_auto_lov
+   setTimeout(function() {
+       handleLov(window);
+       if (targetDoc.activeElement && targetDoc.activeElement.blur) {
+           targetDoc.activeElement.blur();
+       }
+       targetDoc.body.focus();
+   }, 500);
 
-   return "Clicked Add Row Products successfully";
+   return "Success";
 }
