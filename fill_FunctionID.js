@@ -12,20 +12,20 @@ function ExecuteScript() {
        return null;
    }
 
-   // 1. Tìm frame chứa ô nhập Function ID
+   // 1. Tìm frame chứa ô nhập liệu Function ID
    var targetDoc = findDoc(window, 'input[name="ROLEFUN"]');
    if (!targetDoc) return "ERROR_NO_FRAME";
 
-   // Biến Function ID truyền từ vòng lặp Excel trong PAD
-   var funcIdVal = "%CurrentRow['FunctionId']%".trim();
+   // Lấy giá trị biến Function ID từ Power Automate Desktop
+   var funcIdVal = "%CurrentRow['FunctionID']%".trim();
 
-   // Lấy ô input Function ID ở dòng cuối cùng (dòng đang thêm/dòng trống)
+   // Lấy danh sách các ô input ROLEFUN trên bảng (dòng cuối cùng là dòng cần điền)
    var funcInputs = Array.from(targetDoc.querySelectorAll('input[id*="ROLEFUNRC"]'));
    if (funcInputs.length === 0) return "ERROR_NO_ROW";
 
    var targetInput = funcInputs[funcInputs.length - 1];
 
-   // 2. Điền giá trị vào ô Function ID
+   // 2. Điền giá trị vào ô input và kích hoạt các event
    targetInput.focus();
    targetInput.value = funcIdVal;
    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -33,11 +33,11 @@ function ExecuteScript() {
    targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, bubbles: true }));
    targetInput.blur();
 
-   // 3. Hàm tìm và chọn giá trị trong LOV
+   // 3. Hàm quét và chọn dòng khớp trong LOV
    function checkAndSelectLov(win) {
        try {
            var doc = win.document;
-           var cells = Array.from(doc.querySelectorAll('td, div[role="gridcell"]'));
+           var cells = Array.from(doc.querySelectorAll('td, div[role="gridcell"], span.oj-table-cell-text'));
            for (var i = 0; i < cells.length; i++) {
                if (cells[i].textContent.trim().toUpperCase() === funcIdVal.toUpperCase()) {
                    var row = cells[i].closest('tr') || cells[i].closest('div[role="row"]') || cells[i];
@@ -59,39 +59,59 @@ function ExecuteScript() {
        return false;
    }
 
-   // 4. Hàm đóng LOV / Popup nếu không tìm thấy
-   function closeLovPopup(win) {
+   // 4. Hàm đóng triệt để LOV/Popup trên mọi frame
+   function forceCloseLov(win) {
        try {
            var doc = win.document;
-           // Tìm nút Close / Cancel hoặc gửi ESC
-           var closeBtn = doc.querySelector('.oj-dialog-header-close-wrapper button, button[title="Close"], .ui-dialog-titlebar-close');
-           if (closeBtn) {
-               closeBtn.click();
-           } else {
-               var escEvt = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true });
-               doc.dispatchEvent(escEvt);
-               if (doc.activeElement) doc.activeElement.dispatchEvent(escEvt);
+           var closeSelectors = [
+               '.oj-dialog-header-close-wrapper button',
+               'button[title="Close"]',
+               'button[aria-label="Close"]',
+               '.ui-dialog-titlebar-close',
+               '#BTN_EXIT',
+               '#BTN_CANCEL',
+               '.oj-dialog-footer button'
+           ];
+           for (var s = 0; s < closeSelectors.length; s++) {
+               var btns = doc.querySelectorAll(closeSelectors[s]);
+               btns.forEach(function(b) {
+                   try { b.click(); } catch(err) {}
+               });
            }
+
+           // Gửi phím Escape vào document và activeElement
+           var esc = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true });
+           doc.dispatchEvent(esc);
+           if (doc.activeElement) {
+               doc.activeElement.dispatchEvent(esc);
+           }
+
            var frames = doc.querySelectorAll('iframe');
-           for (var j = 0; j < frames.length; j++) {
-               closeLovPopup(frames[j].contentWindow);
+           for (var k = 0; k < frames.length; k++) {
+               forceCloseLov(frames[k].contentWindow);
            }
        } catch(e) {}
    }
 
-   // 5. Kiểm tra đồng bộ kết quả LOV (thử quét ngay và qua các frame)
+   // 5. Kiểm tra kết quả hiển thị
    var isFound = checkAndSelectLov(window);
 
    if (!isFound) {
-       // Nếu không tìm thấy, xóa trắng ô hiện tại để tái sử dụng ngay dòng này cho lần lặp tiếp theo
+       // Xóa sạch ô nhập hiện tại để tái sử dụng ngay vị trí này cho dòng sau
        targetInput.focus();
        targetInput.value = "";
        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
        targetInput.blur();
 
-       // Đóng popup cảnh báo / popup LOV rác nếu có
-       closeLovPopup(window);
+       // Đóng popup ở window hiện tại và window top
+       forceCloseLov(window);
+       try {
+           if (window.top && window.top !== window) {
+               forceCloseLov(window.top);
+           }
+       } catch(e) {}
+
        return "NOT_FOUND";
    }
 
