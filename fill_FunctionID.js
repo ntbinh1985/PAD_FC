@@ -12,20 +12,17 @@ function ExecuteScript() {
        return null;
    }
 
-   // 1. Tìm frame chứa ô nhập liệu Function ID
+   // 1. Tìm frame chứa ô nhập ROLEFUN
    var targetDoc = findDoc(window, 'input[name="ROLEFUN"]');
    if (!targetDoc) return "ERROR_NO_FRAME";
 
-   // Lấy giá trị biến Function ID từ Power Automate Desktop
    var funcIdVal = "%CurrentRow['FunctionID']%".trim();
-
-   // Lấy danh sách các ô input ROLEFUN trên bảng (dòng cuối cùng là dòng cần điền)
    var funcInputs = Array.from(targetDoc.querySelectorAll('input[id*="ROLEFUNRC"]'));
    if (funcInputs.length === 0) return "ERROR_NO_ROW";
 
    var targetInput = funcInputs[funcInputs.length - 1];
 
-   // 2. Điền giá trị vào ô input và kích hoạt các event
+   // 2. Điền giá trị vào ô input
    targetInput.focus();
    targetInput.value = funcIdVal;
    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -33,7 +30,7 @@ function ExecuteScript() {
    targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, bubbles: true }));
    targetInput.blur();
 
-   // 3. Hàm quét và chọn dòng khớp trong LOV
+   // 3. Quét kết quả trong bảng LOV
    function checkAndSelectLov(win) {
        try {
            var doc = win.document;
@@ -59,58 +56,59 @@ function ExecuteScript() {
        return false;
    }
 
-   // 4. Hàm đóng triệt để LOV/Popup trên mọi frame
-   function forceCloseLov(win) {
+   // 4. CHỈ ĐÓNG RIÊNG POPUP "List of Values Role Function"
+   function closeOnlyLovPopup(win) {
        try {
            var doc = win.document;
-           var closeSelectors = [
-               '.oj-dialog-header-close-wrapper button',
-               'button[title="Close"]',
-               'button[aria-label="Close"]',
-               '.ui-dialog-titlebar-close',
-               '#BTN_EXIT',
-               '#BTN_CANCEL',
-               '.oj-dialog-footer button'
-           ];
-           for (var s = 0; s < closeSelectors.length; s++) {
-               var btns = doc.querySelectorAll(closeSelectors[s]);
-               btns.forEach(function(b) {
-                   try { b.click(); } catch(err) {}
-               });
+           
+           // Cách 1: Tìm dialog có tiêu đề chứa chữ "List of Values"
+           var headers = Array.from(doc.querySelectorAll('.oj-dialog-title, .ui-dialog-title, h1, h2, h3, div'));
+           for (var i = 0; i < headers.length; i++) {
+               if (headers[i].textContent.includes('List of Values Role Function')) {
+                   var dialogBox = headers[i].closest('oj-dialog, div[role="dialog"], .oj-dialog, .ui-dialog');
+                   if (dialogBox) {
+                       var closeBtn = dialogBox.querySelector('.oj-dialog-header-close-wrapper button, button[title="Close"], .ui-dialog-titlebar-close, .oj-dialog-close-icon');
+                       if (closeBtn) {
+                           closeBtn.click();
+                           return true;
+                       }
+                   }
+               }
            }
 
-           // Gửi phím Escape vào document và activeElement
-           var esc = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true });
-           doc.dispatchEvent(esc);
-           if (doc.activeElement) {
-               doc.activeElement.dispatchEvent(esc);
+           // Cách 2: Nếu lồng trong iframe LOV riêng, tìm nút close trên dialog có z-index cao nhất
+           var allDialogs = Array.from(doc.querySelectorAll('oj-dialog, div[role="dialog"], .oj-dialog'));
+           if (allDialogs.length > 1) {
+               // Dialog xuất hiện sau cùng chính là popup LOV
+               var topDialog = allDialogs[allDialogs.length - 1];
+               var topBtn = topDialog.querySelector('.oj-dialog-header-close-wrapper button, button[title="Close"], .oj-dialog-close-icon');
+               if (topBtn) {
+                   topBtn.click();
+                   return true;
+               }
            }
 
            var frames = doc.querySelectorAll('iframe');
            for (var k = 0; k < frames.length; k++) {
-               forceCloseLov(frames[k].contentWindow);
+               if (closeOnlyLovPopup(frames[k].contentWindow)) return true;
            }
        } catch(e) {}
+       return false;
    }
 
-   // 5. Kiểm tra kết quả hiển thị
+   // 5. Kiểm tra kết quả
    var isFound = checkAndSelectLov(window);
 
    if (!isFound) {
-       // Xóa sạch ô nhập hiện tại để tái sử dụng ngay vị trí này cho dòng sau
+       // Xóa sạch ô nhập trên bảng Online để nhập Function ID khác vào chính dòng này
        targetInput.focus();
        targetInput.value = "";
        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
        targetInput.blur();
 
-       // Đóng popup ở window hiện tại và window top
-       forceCloseLov(window);
-       try {
-           if (window.top && window.top !== window) {
-               forceCloseLov(window.top);
-           }
-       } catch(e) {}
+       // Đóng duy nhất popup LOV
+       closeOnlyLovPopup(window);
 
        return "NOT_FOUND";
    }
