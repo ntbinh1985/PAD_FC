@@ -1,118 +1,114 @@
 function ExecuteScript() {
-   function findDoc(win, sel) {
-       try {
-           var doc = win.document;
-           if (doc.querySelector(sel)) return doc;
-           var frames = doc.querySelectorAll('iframe');
-           for (var i = 0; i < frames.length; i++) {
-               var found = findDoc(frames[i].contentWindow, sel);
-               if (found) return found;
-           }
-       } catch(e) {}
-       return null;
-   }
+    function findDoc(win, sel) {
+        try {
+            var doc = win.document;
+            if (doc.querySelector(sel)) return doc;
+            var frames = doc.querySelectorAll('iframe');
+            for (var i = 0; i < frames.length; i++) {
+                var found = findDoc(frames[i].contentWindow, sel);
+                if (found) return found;
+            }
+        } catch(e) {}
+        return null;
+    }
 
-   // 1. Tìm frame chứa input ROLEFUN của Maintenance
-   var targetDoc = findDoc(window, 'input[id*="BLK_ROLEDETAIL__ROLEFUNRC"]') || findDoc(window, '#dataContainer_BLK_ROLEDETAIL') || findDoc(window, 'input[name="ROLEFUN"]');
-   if (!targetDoc) return "ERROR_NO_FRAME";
+    // 1. Tìm frame chứa input ROLEFUN của Maintenance
+    var targetDoc = findDoc(window, '#dataContainer_BLK_ROLEDETAIL') || findDoc(window, 'input[id*="BLK_ROLEDETAIL__ROLEFUNRC"]') || findDoc(window, 'input[name="ROLEFUN"]');
+    if (!targetDoc) return "ERROR_NO_FRAME";
 
-   var funcIdVal = "%CurrentRow['FunctionID']%".trim();
+    var funcIdVal = "%CurrentRow['FunctionID']%".trim();
 
-   // 2. Tìm chính xác ô input ở dòng cuối cùng của bảng Maintenance
-   var allInputs = Array.from(targetDoc.querySelectorAll('input[name="ROLEFUN"]'));
-   var funcInputs = allInputs.filter(function(el) {
-       return el.id.includes('BLK_ROLEDETAIL__') || (!el.id.includes('ROLEDETAILD') && el.id.includes('ROLEFUNRC'));
-   });
+    // 2. Lấy ô input ở dòng cuối cùng của bảng Maintenance
+    var allInputs = Array.from(targetDoc.querySelectorAll('input[name="ROLEFUN"]'));
+    var funcInputs = allInputs.filter(function(el) {
+        return el.id.includes('BLK_ROLEDETAIL__') || (!el.id.includes('ROLEDETAILD') && el.id.includes('ROLEFUNRC'));
+    });
+    if (funcInputs.length === 0) funcInputs = allInputs;
+    if (funcInputs.length === 0) return "ERROR_NO_ROW";
 
-   if (funcInputs.length === 0) funcInputs = allInputs;
-   if (funcInputs.length === 0) return "ERROR_NO_ROW";
+    var targetInput = funcInputs[funcInputs.length - 1];
 
-   var targetInput = funcInputs[funcInputs.length - 1];
+    // 3. Điền giá trị vào ô input và kích hoạt sự kiện của FC
+    targetInput.focus();
+    targetInput.value = funcIdVal;
+    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+    targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, bubbles: true }));
+    targetInput.blur();
 
-   // 3. Kích hoạt chế độ soạn thảo và điền giá trị
-   ['mousedown', 'mouseup', 'click'].forEach(function(evName) {
-       targetInput.dispatchEvent(new MouseEvent(evName, { bubbles: true, cancelable: true, view: targetDoc.defaultView }));
-   });
-   targetInput.focus();
-   targetInput.value = funcIdVal;
-   targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-   targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+    // 4. Hàm tìm bảng LOV xem có đang mở trên màn hình không
+    function findLovDialog(win) {
+        try {
+            var doc = win.document;
+            var dialogs = Array.from(doc.querySelectorAll('oj-dialog, div[role="dialog"], .oj-dialog'));
+            for (var i = 0; i < dialogs.length; i++) {
+                var titleText = dialogs[i].innerText || dialogs[i].textContent || "";
+                if (titleText.includes("List of Values Role Function")) {
+                    return { doc: doc, dlg: dialogs[i] };
+                }
+            }
+            var frames = doc.querySelectorAll('iframe');
+            for (var j = 0; j < frames.length; j++) {
+                var res = findLovDialog(frames[j].contentWindow);
+                if (res) return res;
+            }
+        } catch(e) {}
+        return null;
+    }
 
-   // Gửi phím Enter hoặc Tab để trigger disp_auto_lov của FC
-   targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-   targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, which: 9, bubbles: true }));
+    // 5. Hàm đóng riêng bảng popup LOV
+    function closeLov(lovObj) {
+        if (!lovObj || !lovObj.dlg) return;
+        var closeBtn = lovObj.dlg.querySelector('.oj-dialog-header-close-wrapper button, button[title="Close"], .oj-dialog-close-icon');
+        if (closeBtn) {
+            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(function(ev) {
+                closeBtn.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: lovObj.doc.defaultView }));
+            });
+        }
+    }
 
-   // 4. Hàm quét và chọn dòng khớp trong LOV
-   function checkAndSelectLov(win) {
-       try {
-           var doc = win.document;
-           var cells = Array.from(doc.querySelectorAll('td, div[role="gridcell"], span.oj-table-cell-text'));
-           for (var i = 0; i < cells.length; i++) {
-               if (cells[i].textContent.trim().toUpperCase() === funcIdVal.toUpperCase()) {
-                   var row = cells[i].closest('tr') || cells[i].closest('div[role="row"]') || cells[i];
-                   ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(function(evt) {
-                       cells[i].dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: win }));
-                       row.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: win }));
-                   });
-                   var enter = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
-                   row.dispatchEvent(enter);
-                   cells[i].dispatchEvent(enter);
-                   return true;
-               }
-           }
-           var frames = doc.querySelectorAll('iframe');
-           for (var j = 0; j < frames.length; j++) {
-               if (checkAndSelectLov(frames[j].contentWindow)) return true;
-           }
-       } catch(e) {}
-       return false;
-   }
+    // 6. Kiểm tra sau khi đã chờ hệ thống xử lý
+    setTimeout(function() {
+        var lovObj = findLovDialog(window);
 
-   // 5. Hàm chỉ đóng bảng popup LOV
-   function closeLovModal(win) {
-       try {
-           var doc = win.document;
-           var dialogs = Array.from(doc.querySelectorAll('oj-dialog, div[role="dialog"], .oj-dialog'));
-           for (var d = 0; d < dialogs.length; d++) {
-               var dlg = dialogs[d];
-               var text = dlg.innerText || dlg.textContent || "";
-               if (text.includes("List of Values Role Function")) {
-                   var closeBtn = dlg.querySelector('.oj-dialog-header-close-wrapper button, button[title="Close"], .oj-dialog-close-icon');
-                   if (closeBtn) {
-                       ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(function(ev) {
-                           closeBtn.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: win }));
-                       });
-                       return true;
-                   }
-               }
-           }
-           var frames = doc.querySelectorAll('iframe');
-           for (var k = 0; k < frames.length; k++) {
-               if (closeLovModal(frames[k].contentWindow)) return true;
-           }
-       } catch(e) {}
-       return false;
-   }
+        // Trường hợp A: Bảng LOV KHÔNG xuất hiện -> FC đã tự động nhận diện giá trị khớp hoàn toàn
+        if (!lovObj) {
+            // Giữ nguyên dữ liệu, không làm gì cả
+            return;
+        }
 
-   // 6. Tách rời việc dọn dẹp vào setTimeout để bảng LOV có thời gian hiển thị
-   setTimeout(function() {
-       var isFound = checkAndSelectLov(window);
-       if (!isFound) {
-           // Nếu không tìm thấy sau thời gian chờ, mới xóa ô và tắt popup
-           targetInput.focus();
-           targetInput.value = "";
-           targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-           targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-           targetInput.blur();
+        // Trường hợp B: Bảng LOV CÓ xuất hiện -> Quét tìm dòng khớp bên trong bảng
+        var cells = Array.from(lovObj.dlg.querySelectorAll('td, div[role="gridcell"], span.oj-table-cell-text'));
+        var foundCell = null;
 
-           closeLovModal(window);
-           try {
-               if (window.top && window.top !== window) {
-                   closeLovModal(window.top);
-               }
-           } catch(e) {}
-       }
-   }, 600);
+        for (var i = 0; i < cells.length; i++) {
+            if (cells[i].textContent.trim().toUpperCase() === funcIdVal.toUpperCase()) {
+                foundCell = cells[i];
+                break;
+            }
+        }
 
-   return "SUCCESS_TRIGGERED";
+        if (foundCell) {
+            // Tìm thấy -> Click chọn dòng và bấm Enter
+            var row = foundCell.closest('tr') || foundCell.closest('div[role="row"]') || foundCell;
+            ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(function(evt) {
+                foundCell.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: lovObj.doc.defaultView }));
+                row.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: lovObj.doc.defaultView }));
+            });
+            var enter = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
+            row.dispatchEvent(enter);
+            foundCell.dispatchEvent(enter);
+        } else {
+            // Không tìm thấy trong danh sách LOV -> Lúc này MỚI xóa trắng ô và tắt LOV
+            targetInput.focus();
+            targetInput.value = "";
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+            targetInput.blur();
+
+            closeLov(lovObj);
+        }
+    }, 1500); // Tăng thời gian chờ lên 1.5s để LOV kịp tải danh sách từ server
+
+    return "SUCCESS";
 }
