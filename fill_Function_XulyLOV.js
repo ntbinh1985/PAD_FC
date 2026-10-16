@@ -22,55 +22,22 @@ function ExecuteScript() {
 
     var targetRoleInput = roleInputs[roleInputs.length - 1];
 
-    function fillField(inputEl, val) {
-        if (!inputEl) return;
-        inputEl.focus();
-        inputEl.value = val;
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-        inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, bubbles: true }));
-        inputEl.blur();
+    // Điền giá trị
+    targetRoleInput.focus();
+    targetRoleInput.value = roleVal;
+    targetRoleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    targetRoleInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Cập nhật lên component oj-input-text nếu có
+    var ojComponent = targetRoleInput.closest('oj-input-text');
+    if (ojComponent) {
+        ojComponent.value = roleVal;
+        ojComponent.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    // Điền Role Function
-    fillField(targetRoleInput, roleVal);
+    // Tab out để trigger Flexcube kiểm tra mã
+    targetRoleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', keyCode: 9, bubbles: true }));
+    targetRoleInput.blur();
 
-    // Quét và xử lý popup LOV (nếu bật lên)
-    function handleLov(win) {
-        try {
-            var doc = win.document;
-            var cells = Array.from(doc.querySelectorAll('td, div[role="gridcell"]'));
-            for (var i = 0; i < cells.length; i++) {
-                if (cells[i].textContent.trim().toUpperCase() === roleVal.toUpperCase()) {
-                    var row = cells[i].closest('tr') || cells[i].closest('div[role="row"]') || cells[i];
-                    ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(function(evt) {
-                        cells[i].dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: win }));
-                        row.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: win }));
-                    });
-                    var enter = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
-                    row.dispatchEvent(enter);
-                    cells[i].dispatchEvent(enter);
-                    return true;
-                }
-            }
-            var frames = doc.querySelectorAll('iframe');
-            for (var j = 0; j < frames.length; j++) {
-                if (handleLov(frames[j].contentWindow)) return true;
-            }
-        } catch(e) {}
-        return false;
-    }
-
-    // Chờ 600ms cho popup LOV xuất hiện nếu có
-    setTimeout(function() {
-        handleLov(window);
-        if (targetDoc.activeElement && targetDoc.activeElement.blur) {
-            targetDoc.activeElement.blur();
-        }
-        if (targetDoc.body) {
-            targetDoc.body.focus();
-        }
-    }, 600);
-
-    return "DONE";
+    return "INPUTTED";
 }
