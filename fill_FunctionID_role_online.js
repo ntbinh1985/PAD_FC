@@ -106,7 +106,7 @@ function ExecuteScript() {
     setTimeout(function() {
         var found = checkAndHandleLov(window);
         if (!found) {
-            // Không tìm thấy trong LOV: Chỉ tắt bảng LOV đi, giá trị đã điền trong ô targetInput giữ nguyên 100%
+            // Không tìm thấy trong LOV: Chỉ tắt bảng LOV đi, giá trị đã điền trong ô targetInput giữ nguyên 
             var closed = forceCloseLovPopup(window);
             if (!closed) {
                 try {
