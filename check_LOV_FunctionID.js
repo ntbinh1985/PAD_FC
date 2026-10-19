@@ -1,65 +1,72 @@
 function ExecuteScript() {
     function checkAndCloseLov(win) {
+        var doc;
+        // Bọc try-catch riêng cho document để nếu đụng iframe cấm truy cập thì bỏ qua nhẹ nhàng
         try {
-            var doc = win.document;
-            if (!doc) return false;
+            doc = win.document;
+        } catch(e) {
+            return false; 
+        }
+        if (!doc) return false;
 
-            // 1. Tìm trực tiếp khung bảng LOV
+        // 1. Quét khung LOV ở cấp độ hiện tại
+        try {
             var dialogs = doc.querySelectorAll('oj-dialog#scrollingDialog, div#scrollingDialog, div.lov-container');
-
             for (var d = 0; d < dialogs.length; d++) {
                 var dialog = dialogs[d];
                 var rect = dialog.getBoundingClientRect();
                 var style = win.getComputedStyle(dialog);
                 var isAriaHidden = dialog.getAttribute('aria-hidden') === 'true';
 
-                // 2. Kiểm tra gắt gao: Phải to, đang hiển thị và không bị giấu ngầm mới là LOV thật
-                if (rect.width > 50 && rect.height > 50 && style.display !== 'none' && !isAriaHidden) {
+                // Hạ tiêu chuẩn kích thước xuống > 20px để bắt bảng kể cả khi nó đang animation
+                if (rect.width > 20 && rect.height > 20 && style.display !== 'none' && !isAriaHidden) {
                     
-                    // 3. Tiến hành đóng bảng LOV
                     if (typeof win.fnExitLov === 'function') {
-                        win.fnExitLov(); // Ưu tiên gọi hàm native của Flexcube
+                        win.fnExitLov();
                     } else {
-                        // Chỉ tìm nút đóng nằm GỌN TRONG bảng LOV này (tránh click nhầm dấu X của màn hình chính)
                         var closeBtn = dialog.querySelector('.oj-dialog-header-close, #WNDbuttonsMin, button[title="Close"]');
                         if (closeBtn) {
                             var innerBtn = closeBtn.querySelector('button') || closeBtn;
                             innerBtn.click();
                         }
                     }
-
-                    return true; // Xác nhận CÓ bảng LOV và đã xử lý
+                    return true;
                 }
             }
+        } catch(e) {}
 
-            // 4. Quét đệ quy vào các iframe con đang hiển thị
-            var frames = doc.querySelectorAll('iframe');
-            for (var i = 0; i < frames.length; i++) {
-                var f = frames[i];
-                var fRect = f.getBoundingClientRect();
+        // 2. Quét vào iframe con
+        var frames;
+        try {
+            frames = doc.querySelectorAll('iframe');
+        } catch(e) { 
+            frames = []; 
+        }
+
+        for (var i = 0; i < frames.length; i++) {
+            var f = frames[i];
+            try {
+                // CHỐT TỬ HUYỆT: try-catch phải nằm BÊN TRONG vòng lặp
+                // Đề phòng 1 iframe bị lỗi CORS thì chỉ bỏ qua nó, vẫn quét tiếp các iframe khác!
                 var fStyle = win.getComputedStyle(f);
-
-                // Chỉ quét iframe nếu bản thân iframe đó đang hiển thị
-                if (fStyle.display !== 'none' && fRect.width > 0) {
+                if (fStyle.display !== 'none') {
                     if (checkAndCloseLov(f.contentWindow)) {
                         return true;
                     }
                 }
+            } catch(e) {
+                // Nuốt lỗi iframe này, âm thầm đi tiếp
             }
-        } catch(e) {
-            // Bỏ qua lỗi CORS nếu có
         }
-
+        
         return false;
     }
 
-    // Bắt đầu quét từ cửa sổ gốc
     var isShowing = checkAndCloseLov(window);
 
-    // KẾT LUẬN
     if (isShowing) {
-        return "NOT_FOUND"; // Function ID sai -> Bung bảng LOV -> Trả về NOT_FOUND
+        return "NOT_FOUND";
     }
 
-    return "Success"; // Function ID đúng -> Bảng ẩn/không bật -> Trả về Success
+    return "Success";
 }
