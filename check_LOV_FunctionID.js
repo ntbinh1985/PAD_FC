@@ -1,58 +1,70 @@
 function ExecuteScript() {
-    // 1. Kiểm tra khung chứa popup LOV trên trang chính
-    var childWin = document.getElementById('ChildWin');
-    var iframe = document.getElementById('ifrSubScreen');
+    // Hàm quét tìm và đóng bảng LOV xuyên qua mọi lớp iframe
+    function scanAndCloseLov(win) {
+        try {
+            var doc = win.document;
+            if (!doc) return false;
 
-    // Nếu thẻ bọc ngoài không tồn tại, bị ẩn (display: none), hoặc không có iframe
-    // => Chắc chắn LOV không xuất hiện => Trả về Success
-    if (!childWin || childWin.style.display === 'none' || !iframe) {
-        return "Success";
-    }
+            // 1. Kiểm tra trực tiếp nút đóng WNDbuttonsMin trong window hiện tại
+            var closeBtnComponent = doc.querySelector('#WNDbuttonsMin');
+            if (closeBtnComponent && (closeBtnComponent.offsetWidth > 0 || closeBtnComponent.offsetHeight > 0)) {
+                // Ưu tiên gọi hàm fnExitLov của hệ thống để đóng
+                if (typeof win.fnExitLov === 'function') {
+                    win.fnExitLov();
+                } else {
+                    var realBtn = closeBtnComponent.querySelector('button') || closeBtnComponent;
+                    realBtn.click();
+                }
+                return true; // Đã tìm thấy và đóng
+            }
 
-    // 2. Can thiệp vào bên trong iframe chứa LOV
-    try {
-        var doc = iframe.contentWindow.document;
-        var win = iframe.contentWindow;
-
-        // Bắt chính xác bảng LOV theo ID
-        var dialog = doc.getElementById('scrollingDialog');
-        
-        if (dialog) {
-            var style = win.getComputedStyle(dialog);
-            // Xác nhận bảng thực sự đang hiển thị
-            if (style.display !== 'none' && style.visibility !== 'hidden') {
-                
-                // Tìm nút đóng
-                var closeBtnComponent = doc.getElementById('WNDbuttonsMin');
-                if (closeBtnComponent) {
+            // 2. Tìm thẻ bọc ngoài ChildWin chứa iframe ifrSubScreen
+            var childWin = doc.getElementById('ChildWin');
+            if (childWin) {
+                var style = win.getComputedStyle(childWin);
+                if (style.display === 'block') { // Flexcube set style="display: block;" khi LOV hiện
                     
-                    // Phương án A: Gọi trực tiếp hàm gốc của Flexcube nằm trong iframe
-                    if (typeof win.fnExitLov === 'function') {
-                        win.fnExitLov();
-                    } 
-                    // Phương án B: Click vật lý vào thẻ button bên trong
-                    else {
-                        var realBtn = closeBtnComponent.querySelector('button');
-                        if (realBtn) {
-                            realBtn.click();
-                        } else {
-                            closeBtnComponent.click();
+                    var subIframe = doc.getElementById('ifrSubScreen');
+                    if (subIframe && subIframe.contentWindow) {
+                        // Thử can thiệp vào iframe LOV con để tìm nút đóng
+                        var subDoc = subIframe.contentWindow.document;
+                        var subClose = subDoc.querySelector('#WNDbuttonsMin');
+                        if (subClose) {
+                            if (typeof subIframe.contentWindow.fnExitLov === 'function') {
+                                subIframe.contentWindow.fnExitLov();
+                            } else {
+                                var btn = subClose.querySelector('button') || subClose;
+                                btn.click();
+                            }
+                            return true;
                         }
                     }
                     
-                    // Đã đóng thành công bảng LOV => Function ID không hợp lệ
-                    return "NOT_FOUND";
+                    // Phương án dự phòng: Nếu không click được nút, ép ẩn hẳn thẻ div bọc ngoài
+                    childWin.style.display = 'none';
+                    return true; // LOV có xuất hiện (dù đóng bằng cách ép ẩn)
                 }
             }
+
+            // 3. Đệ quy tiếp tục chui vào các iframe khác (iframe giao diện chính của Flexcube)
+            var frames = doc.querySelectorAll('iframe');
+            for (var i = 0; i < frames.length; i++) {
+                if (scanAndCloseLov(frames[i].contentWindow)) {
+                    return true;
+                }
+            }
+        } catch (e) {
+            // Bỏ qua lỗi DOM bảo mật cross-origin nếu có
         }
-    } catch (e) {
-        // Lỗi DOM / Cross-Origin (ít xảy ra vì chung hệ thống)
-        // Nếu div ChildWin đang block mà không can thiệp được iframe, ép ẩn div đó đi
-        if (childWin && childWin.style.display === 'block') {
-            childWin.style.display = 'none';
-            return "NOT_FOUND";
-        }
+        return false;
     }
 
-    return "Success";
+    // Bắt đầu quét từ window ngoài cùng
+    var isLovFound = scanAndCloseLov(window);
+
+    if (isLovFound) {
+        return "NOT_FOUND"; // Phát hiện có bảng LOV hiện lên -> Function ID sai
+    }
+
+    return "Success"; // Hoàn toàn không có bảng LOV nào hiển thị -> Function ID đúng
 }
